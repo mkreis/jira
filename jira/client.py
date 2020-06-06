@@ -396,7 +396,6 @@ class JIRA(object):
         # force a copy of the tuple to be used in __del__() because
         # sys.version_info could have already been deleted in __del__()
         self.sys_version_info = tuple([i for i in sys.version_info])
-
         if options is None:
             options = {}
             if server and hasattr(server, 'keys'):
@@ -3308,6 +3307,65 @@ class JIRA(object):
         else:
             raise NotImplementedError('No API for adding issues to sprint for agile_rest_path="%s"' %
                                       self._options['agile_rest_path'])
+
+    def get_issues_from_sprint(self, sprint_id, startAt=0, maxResults=50, fields=None, expand=None,
+                          json_result=None):
+            """Get a :class:`~jira.client.ResultList` for issues in sprint with ``sprint_id``.
+
+            :param sprint_id: the sprint id to retrieve issues for
+            :param startAt: index of the first issue to return
+            :param maxResults: maximum number of issues to return. Total number of results
+                is available in the ``total`` attribute of the returned :class:`~jira.client.ResultList`.
+                If maxResults evaluates as False, it will try to get all issues in batches.
+            :param fields: comma-separated string of issue fields to include in the results
+            :param expand: extra information to fetch inside each resource
+            :param json_result: JSON response will be returned when this parameter is set to True.
+                    Otherwise, :class:`~jira.client.ResultList` will be returned.
+
+            :type sprint_id: int
+            :type startAt: int
+            :type maxResults: int
+            :type fields: str
+            :type expand: str
+            :type json_result: bool
+
+            :rtype: dict or :class:`~jira.client.ResultList`
+            """
+            if fields is None:
+                fields = []
+            elif isinstance(fields, list):
+                fields = fields.copy()
+            elif isinstance(fields, string_types):
+                fields = fields.split(",")
+
+            # this will translate JQL field names to REST API Name
+            # most people do know the JQL names so this will help them use the API easier
+            untranslate = {}  # use to add friendly aliases when we get the results back
+            if self._fields:
+                for i, field in enumerate(fields):
+                    if field in self._fields:
+                        untranslate[self._fields[field]] = fields[i]
+                        fields[i] = self._fields[field]
+
+            search_params = {
+                "startAt": startAt,
+                "fields": fields,
+                "expand": expand}
+            if json_result:
+                search_params["maxResults"] = maxResults
+                if not maxResults:
+                    warnings.warn('All issues cannot be fetched at once, when json_result parameter is set', Warning)
+                return self._get_json('sprint/%s/issue' % sprint_id, params=search_params, base=self.AGILE_BASE_URL)
+
+            issues = self._fetch_pages(Issue, 'issues', 'sprint/%s/issue' % sprint_id, startAt, maxResults, search_params, base=self.AGILE_BASE_URL)
+
+            if untranslate:
+                for i in issues:
+                    for k, v in iteritems(untranslate):
+                        if k in i.raw.get('fields', {}):
+                            i.raw['fields'][v] = i.raw['fields'][k]
+
+            return issues
 
     def add_issues_to_epic(self, epic_id, issue_keys, ignore_epics=True):
         """Add the issues in ``issue_keys`` to the ``epic_id``.
